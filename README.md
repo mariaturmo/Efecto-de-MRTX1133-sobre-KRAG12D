@@ -9,4 +9,4 @@ En el primer estudio se ha llevado a cabo un análisis de microarrays para deter
 
 En el segundo estudio se analizan RNAseqs para determinar los efectos que tiene el nuevo fármaco MRTX1133 sobre los pacientes con cáncer de páncreas que presentan la mutación KRASG12D. En este caso se ha utiliza la seria GEO GSE249539.
 
-Para un correcto funcionamiento del código se deberán descargar los datos de las series GEO al directorio de trabajo. 
+Para un correcto funcionamiento del código se deberán descargar los datos asociados al directorio de trabajo. 
