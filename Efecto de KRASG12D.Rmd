@@ -1,0 +1,251 @@
+---
+title: "Estudio del efecto de KRASG12D"
+author: "Maria Turmo Luckam"
+date: "2024-06-10"
+output: 
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_float: 
+      toc_collapsed: yes
+    toc_depth: 3
+    theme: yeti
+    highlight: textmate
+    number_sections: yes
+---
+```{r message=FALSE, warning=FALSE}
+#Instalación de paquetes
+
+if (!require(BiocManager)) install.packages("BiocManager")
+
+installifnot = function (pkg){
+  if (!require(pkg, character.only=T)){
+    BiocManager::install(pkg)
+  }
+}
+installifnot("mouse430a2.db")
+installifnot("GO.db")
+installifnot("oligo")
+installifnot("limma")
+installifnot("Biobase")
+installifnot("arrayQualityMetrics")
+installifnot("genefilter")
+installifnot("annotate")
+installifnot("xtable")
+installifnot("gplots")
+installifnot("GOstats")
+
+require(kableExtra)
+```
+
+```{r}
+#Creación de directorios
+workingDir= getwd()
+```
+
+```{r}
+library(Biobase)
+#Subida de datos target
+
+targetsDF =read.csv(file=file.path(workingDir,"targets.csv"), 
+                    header = TRUE, sep=";") 
+sampleNames= as.character(targetsDF$ShortName)
+sampleColor= as.character(targetsDF$Colors)
+targets= AnnotatedDataFrame(targetsDF)
+kable(targetsDF)
+```
+
+```{r message=FALSE, warning=FALSE}
+#Subida de datos CEL 
+
+CELfiles= targets$FileName
+rawData= read.celfiles(file.path(workingDir, CELfiles), 
+                        phenoData = targets)
+colnames(rawData)= c("ControlWT1","ControlNEO1", "KRAS1", "KRAS2","ControlWT2"
+                     ,"ControlNEO2", "KRAS3", "KRAS4")
+rawData
+```
+
+# Exploración de los datos
+
+```{r summaryraw}
+kable(summary(exprs(rawData)))
+```
+
+```{r boxplotraw}
+#Boxplot
+boxplot(rawData, which="all",las=2, 
+        main="Distribución de los grupos\n(Datos crudos)", 
+        cex.axis=0.6, col=sampleColor, names=sampleNames)
+```
+
+```{r histogramraw}
+#Histograma
+hist(rawData, target="probeset", 
+     main= "Expresión de los grupos \n(Datos crudos)", 
+     col=sampleColor, lty=1)
+legend(x="topright", legend = sampleNames, 
+       col = sampleColor, cex=0.8, lty=1)
+```
+
+# Normalización
+
+```{r normalizacion}
+rawDat_norm=rma(rawData)
+colnames(rawDat_norm)= c("Control1","Control2", "KRAS1", "KRAS2","Control3",
+                          "Control4", "KRAS3", "KRAS4")
+data=exprs(rawDat_norm)
+dim(data)
+kable(summary(data))
+```
+
+```{r boxplotnorm}
+boxplot(data, which="all",las=2, 
+        main="Distribución de los grupos \n(Datos normalizados)",
+        cex.axis=0.6, col=sampleColor, names=sampleNames)
+```
+
+```{r histogramnorm}
+hist(rawDat_norm, target="probeset", 
+     main= "Expresión de los grupos \n(Datos normalizados)", 
+     col=sampleColor, lty=1)
+legend(x="topright", legend = sampleNames, 
+       col = sampleColor, cex=0.8, lty=1)
+```
+
+```{r PCA}
+plotPCA = function(X, labels=NULL, colors=NULL, dataDesc="", scale=FALSE, 
+                   formapunts=NULL, myCex=0.8,...)
+{ pcX=prcomp(t(X), scale=scale) 
+  loads= round(pcX$sdev^2/sum(pcX$sdev^2)*100,1)
+  xlab=c(paste("PC1",loads[1],"%"))
+  ylab=c(paste("PC2",loads[2],"%"))
+  if (is.null(colors)) colors=1
+  plot(pcX$x[,1:2],xlab=xlab,ylab=ylab, col=colors, pch=formapunts, 
+       xlim=c(min(pcX$x[,1])-5, max(pcX$x[,1])+5),
+       ylim=c(min(pcX$x[,2])-5, max(pcX$x[,2])+5))
+  text(pcX$x[,1],pcX$x[,2], labels, pos=3, cex=myCex)
+  title("Análisis de Componentes Principales (PCA)", cex=0.8)
+}
+
+plotPCA(data, labels=sampleNames, colors=sampleColor,
+        formapunts=c(rep(16,4),rep(17,4)), myCex=0.6)
+```
+
+```{r cluster}
+clust_avg = hclust(dist(t(data)),method="average")
+plot(clust_avg, labels=sampleNames, main="Clúster de los grupos", 
+     cex=0.7,  hang=-1)
+```
+
+# Analisis de la expresión diferencial
+
+```{r matrizdiseño}
+f = factor(c("Control", "Control", "KRAS", "KRAS","Control", "Control", 
+           "KRAS", "KRAS"), levels = c("Control", "KRAS"))
+
+diseño = model.matrix(~ 0 + f)
+colnames(diseño)=c("Control", "KRAS")
+
+diseño
+```
+
+```{r matrizcontraste}
+matriz_contraste= makeContrasts(efecto=(KRAS - Control), levels = diseño)
+matriz_contraste
+```
+
+```{r modelofit}
+modelo=lmFit(data, diseño)
+modelo_contraste=contrasts.fit(modelo, matriz_contraste)
+modelo_eb=eBayes(modelo_contraste)
+```
+
+```{r topgenes}
+topTab= topTable(modelo_eb, number = nrow(modelo_eb), coef = "efecto", 
+                 adjust = "fdr", lfc = 1, p.value = 0.05)
+kable(head(topTab))
+```
+
+```{r volcanoplot}
+volcanoplot(modelo_eb, coef=1, highlight = 10, names=rownames(data), 
+            main="Expresión diferencial de genes \n Control vs KRASG12D", 
+            ylim=c(0,15), xlim=c(-2,2))
+abline(v=c(-1,1))
+```
+
+```{r dfgenes}
+genes=decideTests(modelo_eb, method = 'global', adjust.method = "BH", 
+                  p.value = 0.05, lfc=1)
+kable(summary(genes))
+```
+
+```{r IDgenes}
+genes_diferenciales=genes[genes !=0,]
+df_diferenciales=data.frame(genes_diferenciales)
+ID_upreg=rownames(subset(df_diferenciales, df_diferenciales[,1]==1))
+ID_downreg=rownames(subset(df_diferenciales, df_diferenciales[,1]==-1))
+ID_genesdif=rownames(df_diferenciales)
+```
+
+```{r heatmap}
+hm=exprs(rawDat_norm)[ID_genesdif,]
+my_palette = colorRampPalette(c("blue", "red"))
+
+heatmap.2(hm, Rowv = TRUE, Colv = TRUE, main = "HeatMap \n KRASG12D vs Control",
+          scale = "row", col = my_palette, sepcolor = "white", 
+          sepwidth = c(0.05, 0.05), cexRow = 0.5, cexCol = 0.9, key = TRUE, 
+          keysize = 2,ColSideColors = sampleColor, 
+          tracecol = NULL, srtCol = 30)
+```
+
+```{r upregannot}
+#Genes upregulated
+library(AnnotationDbi)
+library(mouse430a2.db)
+
+entrez_id_up=mapIds(mouse430a2.db, keys=ID_upreg, keytype="PROBEID", 
+                    column="ENTREZID")
+gene_id_up=mapIds(mouse430a2.db, keys=ID_upreg, keytype="PROBEID", 
+                  column="SYMBOL")
+gene_name_up=mapIds(mouse430a2.db, keys=ID_upreg, keytype="PROBEID", 
+                    column="GENENAME")
+go_up=mapIds(mouse430a2.db, keys=ID_upreg, keytype="PROBEID", 
+             column="GO")
+
+
+genes_upreg= data.frame(EntrezID = entrez_id_up, Symbol = gene_id_up, 
+                        Name=gene_name_up, Ontology=go_up)
+kable(genes_upreg)
+```
+
+```{r downregannot}
+#Genes downregulated
+library(AnnotationDbi)
+library(mouse430a2.db)
+
+entrez_id_down=mapIds(mouse430a2.db, keys=ID_downreg, keytype="PROBEID", 
+                      column=c("ENTREZID"))
+gene_id_down=mapIds(mouse430a2.db, keys=ID_downreg, keytype="PROBEID", 
+                    column="SYMBOL")
+gene_name_down=mapIds(mouse430a2.db, keys=ID_downreg, keytype="PROBEID", 
+                      column="GENENAME")
+go_down=mapIds(mouse430a2.db, keys=ID_downreg, keytype="PROBEID", 
+               column="GO")
+
+genes_downreg= data.frame(EntrezID = entrez_id_down, Symbol = gene_id_down, 
+                          Name=gene_name_down, Ontology=go_down)
+kable(genes_downreg)
+```
+
+```{r GO}
+library(GO.db)
+uniqueGO_up= as.character(unique(genes_upreg$Ontology)[1:10])
+
+AnnotationDbi::select(GO.db, keys=uniqueGO_up, 
+                            columns=c("GOID", "ONTOLOGY", "TERM"))
+
+uniqueGO_down= as.character(unique(genes_downreg$Ontology)[1:10])
+AnnotationDbi::select(GO.db, keys=uniqueGO_down, 
+                            columns= c("GOID", "ONTOLOGY", "TERM"))
+```
