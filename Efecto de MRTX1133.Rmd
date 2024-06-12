@@ -1,10 +1,17 @@
 ---
-title: "analisis farmaco"
+title: "Estudio del efecto de MRTX1133"
 author: "Maria Turmo Luckam"
-date: "`r Sys.Date()`"
+date: "12/06/2024"
 output:
-  word_document: default
-  html_document: default
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_float: 
+      toc_collapsed: yes
+    toc_depth: 3
+    theme: yeti
+    highlight: textmate
+    number_sections: yes
 ---
 
 ```{r message=FALSE, warning=FALSE}
@@ -16,6 +23,7 @@ if (!require(org.Hs.eg.db))BiocManager::install("org.Hs.db")
 if (!require(clusterProfiler))BiocManager::install("clusterProfiler")
 if (!require(org.Hs.eg.db))BiocManager::install("org.Hs.eg.db")
 if (!require(clusterprofiler))BiocManager::install("clusterProfiler")
+if (!require(enrichplot))BiocManager::install("enrichplot")
 if (!require(factoextra)) install.packages("factoextra", dep=TRUE)
 require(kableExtra)
 ```
@@ -37,16 +45,16 @@ colnames(all_data)
 expdata=all_data[,c(5, 13, 21, 29, 37, 45, 53, 61, 69, 77, 85, 93)]
 row.names(expdata)=all_data$transcript_id
 colnames(expdata)=c("1222Control 1", "1222Control 2", "1222Control 3", 
-                    "1222TMRX 1","1222TMRX 2","1222TMRX 3", 
+                    "1222MRTX 1","1222MRTX 2","1222MRTX 3", 
                     "3226Control 1", "3226Control 2", "3226Control 3", 
-                    "3226TMRX 1","3226TMRX 2","3226TMRX 3" )
+                    "3226MRTX 1","3226MRTX 2","3226MRTX 3" )
 exp_matriz=as.matrix(expdata)
 ```
 
 ## Preprocesado de los datos
 
 ```{r}
-#Recuento de lecturas ppor millón
+#Recuento de lecturas por millón
 library(edgeR)
 counts.CPM = cpm(exp_matriz)
 ```
@@ -80,7 +88,8 @@ abline(h=median(logcounts), col="red")
 ```{r}
 # Aplicación de normalidad al objeto
 dgeObj_norm= calcNormFactors(dgeObj)
-
+dgeObj_norm$samples$norm.factors
+ 
 #log2 de objeto normalizado
 logcounts_norm= cpm(dgeObj_norm,log=TRUE)
 
@@ -116,22 +125,22 @@ limma::plotMDS(logcounts_norm, main="Status", cex=0.7,
 ```{r}
 #Creación de matriz de diseño y contrastes
 library(limma)
-grupos= c("Control1222", "Control1222", "Control1222", "TMRX1222",
-          "TMRX1222","TMRX1222", "Control3226", "Control3226", 
-          "Control3226", "TMRX3226","TMRX3226","TMRX3226")
+grupos= c("Control1222", "Control1222", "Control1222", "MRTX1222",
+          "MRTX1222","MRTX1222", "Control3226", "Control3226", 
+          "Control3226", "MRTX3226","MRTX3226","MRTX3226")
 
 diseño= model.matrix(~0+grupos)
 
 colnames(diseño)= gsub("grupos", "", colnames(diseño))
-rownames(diseño) = c("Control1222", "Control1222", "Control1222", "TMRX1222","TMRX1222","TMRX1222", "Control3226", "Control3226", "Control3226", "TMRX3226","TMRX3226","TMRX3226")
+rownames(diseño) = c("Control1222", "Control1222", "Control1222", "MRTX1222","MRTX1222","MRTX1222", "Control3226", "Control3226", "Control3226", "MRTX3226","MRTX3226","MRTX3226")
 
 diseño
 ```
 
 ```{r}
 #Creación de matriz de contraste
-cont.matrix = makeContrasts(efecto1222 = (Control1222 - TMRX1222), 
-                            efecto3226 =(Control3226 - TMRX3226), 
+cont.matrix = makeContrasts(efecto1222 = (Control1222 - MRTX1222), 
+                            efecto3226 =(Control3226 - MRTX3226), 
                             levels = diseño)
 cont.matrix
 ```
@@ -170,12 +179,6 @@ volcanoplot(fit.cont,coef=2,highlight=100,names=rownames(exp_matriz),
 ```{r}
 summa.fit = decideTests(fit.cont, p.value = 0.05, lfc = 1)
 summary(summa.fit)
-```
-
-```{r}
-vc= vennCounts(summa.fit)
-vennDiagram(vc, include=c("up", "down"),counts.col=c("red", "blue"),
-            circle.col = c("red", "blue", "green3"), cex=c(1,1,1))
 ```
 
 ```{r}
@@ -229,69 +232,70 @@ entrez_down_3226=mapIds(org.Hs.eg.db, keys=rownames(subset(toptab_3226,
 
 ```{r}
 library(clusterProfiler)
+library(enrichplot)
 ego_up_1222 = enrichGO(gene = entrez_up_1222,
                 keyType = "ENTREZID",
                 OrgDb = org.Hs.eg.db, 
-                ont = "BP", 
+                ont = "ALL", 
                 pAdjustMethod = "none",
                 qvalueCutoff = 0.5, 
                 readable = TRUE)
-head(ego_up_1222)
-dotplot(ego_up_1222, showCategory=10)
-goplot(ego_up_1222, showCategory = 2)
-cnetplot(ego_up_1222)
-library(enrichplot)
+ego_up_1222[1:10]
+
+barplot(ego_up_1222, showCategory = 10, title = "1222 upregulated")
+dotplot(ego_up_1222, showCategory=10, title = "1222 upregulated")
+
 ego_sim_up_1222= pairwise_termsim(ego_up_1222)
-emapplot(ego_sim_up_1222, cex_label_category=0.5)
+emapplot(ego_sim_up_1222, cex_label_category=0.5, showCategory=10)
 ```
 
 ```{r}
 ego_down_1222 = enrichGO(gene = entrez_down_1222,
                 keyType = "ENTREZID",
                 OrgDb = org.Hs.eg.db, 
-                ont = "BP", 
+                ont = "ALL", 
                 pAdjustMethod = "none",
                 qvalueCutoff = 0.5, 
                 readable = TRUE)
-head(ego_down_1222)
-dotplot(ego_down_1222, showCategory=10)
-goplot(ego_down_1222, showCategory = 2)
-cnetplot(ego_down_1222)
-library(enrichplot)
+ego_down_1222[1:10]
+
+barplot(ego_down_1222, showCategory=10, title = "1222 downregulated")
+dotplot(ego_down_1222, showCategory=10, title = "1222 downregulated")
+
 ego_sim_down_1222= pairwise_termsim(ego_down_1222)
-emapplot(ego_sim_down_1222, cex_label_category=0.5)
+emapplot(ego_sim_down_1222, cex_label_category=0.5, showCategory=10)
 ```
 
 ```{r}
 ego_up_3226 = enrichGO(gene = entrez_up_3226,
                 keyType = "ENTREZID",
                 OrgDb = org.Hs.eg.db, 
-                ont = "BP", 
+                ont = "ALL", 
                 pAdjustMethod = "none",
                 qvalueCutoff = 0.5, 
                 readable = TRUE)
-head(ego_up_3226)
-dotplot(ego_up_3226, showCategory=10)
-goplot(ego_up_3226, showCategory = 2)
-cnetplot(ego_up_3226)
-library(enrichplot)
+ego_up_3226[1:10]
+
+barplot(ego_up_3226, showCategory=10, title="3226 upregulated")
+dotplot(ego_up_3226, showCategory=10, title="3226 upregulated")
+
 ego_sim_up_3226= pairwise_termsim(ego_up_3226)
-emapplot(ego_sim_up_3226, cex_label_category=0.5)
+emapplot(ego_sim_up_3226, cex_label_category=0.5, showCategory=10)
 ```
 
 ```{r}
 ego_down_3226 = enrichGO(gene = entrez_down_3226,
                 keyType = "ENTREZID",
                 OrgDb = org.Hs.eg.db, 
-                ont = "BP", 
+                ont = "ALL", 
                 pAdjustMethod = "none",
                 qvalueCutoff = 0.5, 
                 readable = TRUE)
-head(ego_down_3226)
-dotplot(ego_down_3226, showCategory=10)
-goplot(ego_down_3226, showCategory = 2)
-cnetplot(ego_down_3226)
-library(enrichplot)
+ego_down_3226[1:10]
+
+barplot(ego_down_3226, showCategory=10, title="3226 downregulated")
+dotplot(ego_down_3226, showCategory=10, title="3226 downregulated")
+
 ego_sim_down_3226= pairwise_termsim(ego_down_3226)
-emapplot(ego_sim_down_3226, cex_label_category=0.5)
+emapplot(ego_sim_down_3226, cex_label_category=0.5, showCategory=10)
 ```
