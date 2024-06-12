@@ -1,0 +1,297 @@
+---
+title: "analisis farmaco"
+author: "Maria Turmo Luckam"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r message=FALSE, warning=FALSE}
+if (!require(Rsubread)) BiocManager::install("Rsubread")
+if (!require(edgeR))BiocManager::install("edgeR")
+if (!require(limma))BiocManager::install("limma")
+if (!require(pheatmap))BiocManager::install("pheatmap")
+if (!require(org.Hs.eg.db))BiocManager::install("org.Hs.db")
+if (!require(clusterProfiler))BiocManager::install("clusterProfiler")
+if (!require(org.Hs.eg.db))BiocManager::install("org.Hs.eg.db")
+if (!require(clusterprofiler))BiocManager::install("clusterProfiler")
+if (!require(factoextra)) install.packages("factoextra", dep=TRUE)
+require(kableExtra)
+```
+
+## Obtención de la matriz
+
+```{r}
+#Subida de datos
+workingDir = getwd()
+result_files = list.files(workingDir, pattern = "\\.results$", full.names = TRUE)
+result_data = lapply(result_files, read.table, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+all_data = do.call(cbind, result_data)
+dim(all_data)
+colnames(all_data)
+```
+
+```{r}
+#Creación de matriz
+expdata=all_data[,c(5, 13, 21, 29, 37, 45, 53, 61, 69, 77, 85, 93)]
+row.names(expdata)=all_data$transcript_id
+colnames(expdata)=c("1222Control 1", "1222Control 2", "1222Control 3", 
+                    "1222TMRX 1","1222TMRX 2","1222TMRX 3", 
+                    "3226Control 1", "3226Control 2", "3226Control 3", 
+                    "3226TMRX 1","3226TMRX 2","3226TMRX 3" )
+exp_matriz=as.matrix(expdata)
+```
+
+## Preprocesado de los datos
+
+```{r}
+#Recuento de lecturas ppor millón
+library(edgeR)
+counts.CPM = cpm(exp_matriz)
+```
+
+```{r}
+#Calculo del umbral de corte
+thresh = counts.CPM > 0.05
+keep= rowSums(thresh) >= 2
+counts.keep = exp_matriz[keep,]
+```
+
+```{r}
+#Creamos el objeto
+dgeObj= DGEList(counts.keep)
+kable(summary(dgeObj$counts))
+```
+
+## Exploración de los datos
+
+```{r}
+#Obtención de log2 de los counts per million
+logcounts= cpm(dgeObj,log=TRUE)
+summary(logcounts)
+
+boxplot(logcounts, ylab="Log2-CPM",las=2, xlab="", cex.axis=0.8, 
+        main="Boxplot de logCPMs (datos crudos)", 
+        col=(rep(c("lightgreen","pink"), each=3)))
+abline(h=median(logcounts), col="red")
+```
+
+```{r}
+# Aplicación de normalidad al objeto
+dgeObj_norm= calcNormFactors(dgeObj)
+
+#log2 de objeto normalizado
+logcounts_norm= cpm(dgeObj_norm,log=TRUE)
+
+boxplot(logcounts_norm, ylab="Log2-CPM",las=2, xlab="", cex.axis=0.7, 
+        main="Boxplot de logCPMs (datos normalizados)", 
+        col=(rep(c("lightgreen","pink"), each=3)))
+abline(h=median(logcounts_norm), col="red")
+```
+
+```{r}
+#Calculo de matriz de distancias
+distancias= dist(t(logcounts_norm))
+distancias
+```
+
+```{r}
+library(factoextra)
+fviz_dist(distancias)
+```
+
+```{r}
+plot(hclust(distancias),labels = colnames(logcounts_norm),
+     main = "Dendograma de las muestras", cex=0.8)
+```
+
+```{r}
+limma::plotMDS(logcounts_norm, main="Status", cex=0.7, 
+               col= (rep(c("lightgreen","pink"), each=3)))
+```
+
+## Análisis de la expresión diferencial
+
+```{r}
+#Creación de matriz de diseño y contrastes
+library(limma)
+grupos= c("Control1222", "Control1222", "Control1222", "TMRX1222",
+          "TMRX1222","TMRX1222", "Control3226", "Control3226", 
+          "Control3226", "TMRX3226","TMRX3226","TMRX3226")
+
+diseño= model.matrix(~0+grupos)
+
+colnames(diseño)= gsub("grupos", "", colnames(diseño))
+rownames(diseño) = c("Control1222", "Control1222", "Control1222", "TMRX1222","TMRX1222","TMRX1222", "Control3226", "Control3226", "Control3226", "TMRX3226","TMRX3226","TMRX3226")
+
+diseño
+```
+
+```{r}
+#Creación de matriz de contraste
+cont.matrix = makeContrasts(efecto1222 = (Control1222 - TMRX1222), 
+                            efecto3226 =(Control3226 - TMRX3226), 
+                            levels = diseño)
+cont.matrix
+```
+
+```{r}
+#Transformación voom
+voomObj= voom(dgeObj_norm, diseño)
+voomObj
+```
+
+```{r}
+#Ajuste del modelo
+fit = lmFit(voomObj)
+fit.cont = contrasts.fit(fit, cont.matrix)
+fit.cont = eBayes(fit.cont)
+```
+
+```{r}
+toptab_1222 = topTable(fit.cont,coef=1,sort.by="p", 
+                             number=nrow(fit.cont))
+
+toptab_3226 = topTable(fit.cont,coef=2,sort.by="p", 
+                             number=nrow(fit.cont))
+```
+
+```{r}
+volcanoplot(fit.cont,coef=1,highlight=100,names=rownames(exp_matriz), 
+            main="Volcanoplot \nLínea 1222")
+```
+
+```{r}
+volcanoplot(fit.cont,coef=2,highlight=100,names=rownames(exp_matriz), 
+            main="Volcanoplot \nLínea 3226")
+```
+
+```{r}
+summa.fit = decideTests(fit.cont, p.value = 0.05, lfc = 1)
+summary(summa.fit)
+```
+
+```{r}
+vc= vennCounts(summa.fit)
+vennDiagram(vc, include=c("up", "down"),counts.col=c("red", "blue"),
+            circle.col = c("red", "blue", "green3"), cex=c(1,1,1))
+```
+
+```{r}
+#Recuento de genes diferenciales
+topGenes1222= rownames(subset(toptab_1222, (abs(logFC)> 1) & 
+                                (adj.P.Val < 0.05)))
+
+topGenes3226= rownames(subset(toptab_3226, (abs(logFC)> 1) & 
+                                (adj.P.Val < 0.05)))
+
+topGenes=union(topGenes1222, topGenes3226)
+
+```
+
+```{r}
+mat=logcounts_norm[topGenes, ]
+mat = mat - rowMeans(mat)
+library(pheatmap)
+pheatmap(mat)
+```
+
+```{r}
+rownames(toptab_1222)= gsub("\\.\\d+$", "", rownames(toptab_1222))
+rownames(toptab_3226)= gsub("\\.\\d+$", "", rownames(toptab_3226))
+```
+
+```{r}
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+
+entrez_up_1222=mapIds(org.Hs.eg.db,keys=rownames(subset(toptab_1222,
+                      (logFC> 1) & (adj.P.Val < 0.05))), column="ENTREZID", 
+                      keytype="REFSEQ")
+
+
+entrez_down_1222=mapIds(org.Hs.eg.db, keys=rownames(subset(toptab_1222,
+                      (logFC< -1) & (adj.P.Val < 0.05))), column="ENTREZID", 
+                      keytype="REFSEQ")
+
+entrez_up_3226=mapIds(org.Hs.eg.db, keys=rownames(subset(toptab_3226,
+                      (logFC> 1) & (adj.P.Val < 0.05))), column="ENTREZID", 
+                      keytype="REFSEQ")
+
+entrez_down_3226=mapIds(org.Hs.eg.db, keys=rownames(subset(toptab_3226,
+                      (logFC< -1) & (adj.P.Val < 0.05))), column="ENTREZID", 
+                      keytype="REFSEQ")
+
+
+
+```
+
+```{r}
+library(clusterProfiler)
+ego_up_1222 = enrichGO(gene = entrez_up_1222,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "none",
+                qvalueCutoff = 0.5, 
+                readable = TRUE)
+head(ego_up_1222)
+dotplot(ego_up_1222, showCategory=10)
+goplot(ego_up_1222, showCategory = 2)
+cnetplot(ego_up_1222)
+library(enrichplot)
+ego_sim_up_1222= pairwise_termsim(ego_up_1222)
+emapplot(ego_sim_up_1222, cex_label_category=0.5)
+```
+
+```{r}
+ego_down_1222 = enrichGO(gene = entrez_down_1222,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "none",
+                qvalueCutoff = 0.5, 
+                readable = TRUE)
+head(ego_down_1222)
+dotplot(ego_down_1222, showCategory=10)
+goplot(ego_down_1222, showCategory = 2)
+cnetplot(ego_down_1222)
+library(enrichplot)
+ego_sim_down_1222= pairwise_termsim(ego_down_1222)
+emapplot(ego_sim_down_1222, cex_label_category=0.5)
+```
+
+```{r}
+ego_up_3226 = enrichGO(gene = entrez_up_3226,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "none",
+                qvalueCutoff = 0.5, 
+                readable = TRUE)
+head(ego_up_3226)
+dotplot(ego_up_3226, showCategory=10)
+goplot(ego_up_3226, showCategory = 2)
+cnetplot(ego_up_3226)
+library(enrichplot)
+ego_sim_up_3226= pairwise_termsim(ego_up_3226)
+emapplot(ego_sim_up_3226, cex_label_category=0.5)
+```
+
+```{r}
+ego_down_3226 = enrichGO(gene = entrez_down_3226,
+                keyType = "ENTREZID",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "none",
+                qvalueCutoff = 0.5, 
+                readable = TRUE)
+head(ego_down_3226)
+dotplot(ego_down_3226, showCategory=10)
+goplot(ego_down_3226, showCategory = 2)
+cnetplot(ego_down_3226)
+library(enrichplot)
+ego_sim_down_3226= pairwise_termsim(ego_down_3226)
+emapplot(ego_sim_down_3226, cex_label_category=0.5)
+```
